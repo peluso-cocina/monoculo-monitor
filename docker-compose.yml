@@ -1,0 +1,12 @@
+services:
+  bot:
+    build: .
+    container_name: music-backlog-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PATH=/app/data/database.sqlite
+    volumes:
+      # Persistent SQLite storage on NAS host
+      - ./data:/app/data

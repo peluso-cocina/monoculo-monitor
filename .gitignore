@@ -1,0 +1,14 @@
+.agents
+specs/
+docs/
+AGENTS.md
+MEMORY.md
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+data/
+*.sqlite*
+*.db
+*.log
