@@ -6,7 +6,7 @@ import { loadEnv } from './config/env.js';
 import type { BotEvent } from './types/index.js';
 
 export interface ClientOptions {
-  intents: [number, number, number];
+  intents: [number, number, number, number];
   partials: [Partials, Partials, Partials];
 }
 
@@ -16,6 +16,7 @@ export function buildClientOptions(): ClientOptions {
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildMessageReactions,
+      GatewayIntentBits.MessageContent,
     ],
     partials: [Partials.Message, Partials.Reaction, Partials.User],
   };

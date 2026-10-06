@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS user_backlog (
   added_at DATETIME NOT NULL DEFAULT (datetime('now')),
   listened_at DATETIME,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE CASCADE
+  FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE CASCADE,
+  UNIQUE(user_id, release_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_backlog_user_status

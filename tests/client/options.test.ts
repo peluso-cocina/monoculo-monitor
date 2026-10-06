@@ -3,18 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { buildClientOptions, isValidBotEventModule } from '../../src/index.js';
 
 describe('RF-03/RF-04 client options', () => {
-  it('pide exactamente los 3 intents no privilegiados', () => {
+  it('pide exactamente los 4 intents (incluye MessageContent justificado en SPEC-003 RF-00)', () => {
     const { intents } = buildClientOptions();
     expect(intents).toEqual([
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.GuildMessageReactions,
+      GatewayIntentBits.MessageContent,
     ]);
   });
 
-  it('no pide intents privilegiados', () => {
+  it('no pide los privilegiados no justificados', () => {
     const { intents } = buildClientOptions();
-    expect(intents).not.toContain(GatewayIntentBits.MessageContent);
     expect(intents).not.toContain(GatewayIntentBits.GuildMembers);
     expect(intents).not.toContain(GatewayIntentBits.GuildPresences);
   });

@@ -21,3 +21,26 @@ export interface BotCommand {
 }
 
 export type DeployScope = { kind: 'guild'; guildId: string } | { kind: 'global' };
+
+export interface ReactionPayload {
+  messageId: string;
+  channelId: string;
+  authorId: string;
+  userId: string;
+  content: string;
+  embedUrl: string | null;
+  firstRoleName: string | null;
+}
+
+export interface ReleaseMeta {
+  title: string | null;
+  artist: string | null;
+  coverUrl: string | null;
+  url: string | null;
+}
+
+export interface ExtractedRelease {
+  meta: ReleaseMeta;
+  rawContent: string;
+  genreRole: string | null;
+}
