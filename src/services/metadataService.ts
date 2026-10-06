@@ -72,6 +72,7 @@ export async function extractRelease(
   fetchFn: FetchFn = defaultFetch,
   timeoutMs: number = FETCH_TIMEOUT_MS,
 ): Promise<ReleaseMeta | null> {
+  if (isYouTubeUrl(url)) return extractYouTubeRelease(url, fetchFn, timeoutMs);
   try {
     const res = await fetchFn(url, AbortSignal.timeout(timeoutMs));
     if (!res.ok) return null;
@@ -89,4 +90,101 @@ export async function extractRelease(
 export function buildFallback(content: string, url: string | null): ReleaseMeta {
   const title = content.slice(0, FALLBACK_TITLE_CHARS);
   return { title: title === '' ? null : title, artist: null, coverUrl: null, url };
+}
+
+const OEMBED_ENDPOINT = 'https://www.youtube.com/oembed';
+
+export async function extractYouTubeRelease(
+  url: string,
+  fetchFn: FetchFn = defaultFetch,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<ReleaseMeta | null> {
+  try {
+    const res = await fetchFn(`${OEMBED_ENDPOINT}?url=${encodeURIComponent(url)}&format=json`, AbortSignal.timeout(timeoutMs));
+    if (!res.ok) return null;
+    const json: unknown = JSON.parse(await res.text());
+    return parseYouTubeMeta(json, url, isPlaylistUrl(url));
+  } catch {
+    return null;
+  }
+}
+
+const YOUTUBE_APEX = 'youtube.com';
+const YOUTU_BE_APEXES = new Set(['youtu.be', 'www.youtu.be']);
+
+export function normalizeHost(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/\.+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+export function isYouTubeUrl(url: string): boolean {
+  const host = normalizeHost(url);
+  if (host === '') return false;
+  if (YOUTU_BE_APEXES.has(host)) return true;
+  return host === YOUTUBE_APEX || host.endsWith(`.${YOUTUBE_APEX}`);
+}
+
+export function isPlaylistUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.searchParams.has('list')) return true;
+    return parsed.pathname === '/playlist' || parsed.pathname.startsWith('/playlist/');
+  } catch {
+    return false;
+  }
+}
+
+const TOPIC_SUFFIX = ' - Topic';
+
+export function stripTopicSuffix(channel: string): string {
+  const trimmed = channel.trim();
+  if (trimmed.endsWith(TOPIC_SUFFIX)) return trimmed.slice(0, -TOPIC_SUFFIX.length).trim();
+  return trimmed;
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  '#39': "'",
+};
+
+export function decodeEntities(text: string): string {
+  return text
+    .replace(/&(#x[0-9a-fA-F]+|#\d+|\w+);/g, (match, entity: string) => {
+      if (entity.startsWith('#')) {
+        const codePoint = entity.startsWith('#x')
+          ? Number.parseInt(entity.slice(2), 16)
+          : Number.parseInt(entity.slice(1), 10);
+        return Number.isSafeInteger(codePoint) ? String.fromCodePoint(codePoint) : match;
+      }
+      return NAMED_ENTITIES[entity] ?? match;
+    })
+    .trim();
+}
+
+function readStringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+export function parseYouTubeMeta(json: unknown, pageUrl: string, isPlaylist: boolean): ReleaseMeta | null {
+  if (typeof json !== 'object' || json === null) return null;
+  const record = json as Record<string, unknown>;
+  const rawTitle = readStringField(record, 'title');
+  if (rawTitle === null) return null;
+  const author = readStringField(record, 'author_name');
+  const thumbnail = readStringField(record, 'thumbnail_url');
+  return {
+    title: decodeEntities(rawTitle),
+    artist: isPlaylist || author === null ? null : stripTopicSuffix(author),
+    coverUrl: thumbnail,
+    url: pageUrl,
+  };
 }
