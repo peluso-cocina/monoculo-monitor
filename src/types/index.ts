@@ -44,3 +44,27 @@ export interface ExtractedRelease {
   rawContent: string;
   genreRole: string | null;
 }
+
+export interface PendingItem {
+  backlogId: number;
+  releaseId: number;
+  artist: string | null;
+  title: string | null;
+  url: string | null;
+  coverUrl: string | null;
+  genreRole: string | null;
+}
+
+export interface BacklogPage {
+  pageItems: PendingItem[];
+  page: number;
+  totalPages: number;
+}
+
+export type CustomIdKind = 'mark' | 'page';
+
+export interface ParsedCustomId {
+  kind: CustomIdKind;
+  userId: string;
+  page: number;
+}

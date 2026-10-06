@@ -75,3 +75,48 @@ describe('RF-08 backlog repository', () => {
     expect(second.releaseId).not.toBe(first.releaseId);
   });
 });
+
+describe('W1 pending query and marking', () => {
+  function twoPending(db: Database.Database): void {
+    saveReaction(db, BASE);
+    saveReaction(db, { ...BASE, messageId: 'm2', url: 'https://x.com/2', title: 'Segundo' });
+  }
+
+  it('devuelve los pendientes en orden descendente', async () => {
+    const { getPendingBacklog } = await import('../../src/database/backlogRepository.js');
+    const db = openTestDb();
+    twoPending(db);
+    const rows = getPendingBacklog(db, 'u1');
+    expect(rows.map((r) => r.title)).toEqual(['Segundo', 'Disco']);
+  });
+
+  it('no devuelve los listened ni los ajenos', async () => {
+    const { getPendingBacklog, markListened } = await import('../../src/database/backlogRepository.js');
+    const db = openTestDb();
+    twoPending(db);
+    saveReaction(db, { ...BASE, userId: 'u2', messageId: 'm9' });
+    const rows = getPendingBacklog(db, 'u1');
+    expect(rows).toHaveLength(2);
+    markListened(db, 'u1', [rows[0]?.backlogId ?? -1]);
+    expect(getPendingBacklog(db, 'u1')).toHaveLength(1);
+    expect(getPendingBacklog(db, 'u2')).toHaveLength(1);
+  });
+
+  it('markListened cuenta, fija fecha e ignora ajenos/obsoletos', async () => {
+    const { markListened } = await import('../../src/database/backlogRepository.js');
+    const db = openTestDb();
+    twoPending(db);
+    const other = saveReaction(db, { ...BASE, userId: 'u2', messageId: 'm9' });
+    expect(markListened(db, 'u1', [other.backlogId])).toBe(0);
+    expect(markListened(db, 'u1', [999999])).toBe(0);
+    expect(markListened(db, 'u1', [])).toBe(0);
+    const mine = db.prepare("SELECT id FROM user_backlog WHERE user_id = 'u1' LIMIT 1").get() as { id: number };
+    expect(markListened(db, 'u1', [mine.id])).toBe(1);
+    expect(markListened(db, 'u1', [mine.id])).toBe(0);
+    const row = db.prepare('SELECT status, listened_at FROM user_backlog WHERE id = ?').get(mine.id) as {
+      status: string; listened_at: string | null;
+    };
+    expect(row.status).toBe('listened');
+    expect(row.listened_at).not.toBeNull();
+  });
+});
