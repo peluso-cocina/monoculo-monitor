@@ -73,6 +73,7 @@ export async function extractRelease(
   timeoutMs: number = FETCH_TIMEOUT_MS,
 ): Promise<ReleaseMeta | null> {
   if (isYouTubeUrl(url)) return extractYouTubeRelease(url, fetchFn, timeoutMs);
+  if (isSoundCloudUrl(url)) return extractSoundCloudRelease(url, fetchFn, timeoutMs);
   try {
     const res = await fetchFn(url, AbortSignal.timeout(timeoutMs));
     if (!res.ok) return null;
@@ -92,21 +93,53 @@ export function buildFallback(content: string, url: string | null): ReleaseMeta 
   return { title: title === '' ? null : title, artist: null, coverUrl: null, url };
 }
 
-const OEMBED_ENDPOINT = 'https://www.youtube.com/oembed';
+const YOUTUBE_OEMBED_ENDPOINT = 'https://www.youtube.com/oembed';
+const SOUNDCLOUD_OEMBED_ENDPOINT = 'https://soundcloud.com/oembed';
+
+type OEmbedParser = (json: unknown, pageUrl: string, isCollection: boolean) => ReleaseMeta | null;
+
+async function fetchOEmbedMeta(
+  endpoint: string,
+  url: string,
+  parse: OEmbedParser,
+  isCollection: boolean,
+  fetchFn: FetchFn,
+  timeoutMs: number,
+): Promise<ReleaseMeta | null> {
+  try {
+    const res = await fetchFn(
+      `${endpoint}?url=${encodeURIComponent(url)}&format=json`,
+      AbortSignal.timeout(timeoutMs),
+    );
+    if (!res.ok) return null;
+    const json: unknown = JSON.parse(await res.text());
+    return parse(json, url, isCollection);
+  } catch {
+    return null;
+  }
+}
 
 export async function extractYouTubeRelease(
   url: string,
   fetchFn: FetchFn = defaultFetch,
   timeoutMs: number = FETCH_TIMEOUT_MS,
 ): Promise<ReleaseMeta | null> {
-  try {
-    const res = await fetchFn(`${OEMBED_ENDPOINT}?url=${encodeURIComponent(url)}&format=json`, AbortSignal.timeout(timeoutMs));
-    if (!res.ok) return null;
-    const json: unknown = JSON.parse(await res.text());
-    return parseYouTubeMeta(json, url, isPlaylistUrl(url));
-  } catch {
-    return null;
-  }
+  return fetchOEmbedMeta(YOUTUBE_OEMBED_ENDPOINT, url, parseYouTubeMeta, isPlaylistUrl(url), fetchFn, timeoutMs);
+}
+
+export async function extractSoundCloudRelease(
+  url: string,
+  fetchFn: FetchFn = defaultFetch,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<ReleaseMeta | null> {
+  return fetchOEmbedMeta(
+    SOUNDCLOUD_OEMBED_ENDPOINT,
+    url,
+    parseSoundCloudMeta,
+    isSoundCloudSet(url),
+    fetchFn,
+    timeoutMs,
+  );
 }
 
 const YOUTUBE_APEX = 'youtube.com';
@@ -132,6 +165,22 @@ export function isPlaylistUrl(url: string): boolean {
     const parsed = new URL(url);
     if (parsed.searchParams.has('list')) return true;
     return parsed.pathname === '/playlist' || parsed.pathname.startsWith('/playlist/');
+  } catch {
+    return false;
+  }
+}
+
+const SOUNDCLOUD_APEX = 'soundcloud.com';
+
+export function isSoundCloudUrl(url: string): boolean {
+  const host = normalizeHost(url);
+  if (host === '') return false;
+  return host === SOUNDCLOUD_APEX || host.endsWith(`.${SOUNDCLOUD_APEX}`);
+}
+
+export function isSoundCloudSet(url: string): boolean {
+  try {
+    return new URL(url).pathname.split('/').includes('sets');
   } catch {
     return false;
   }
@@ -174,17 +223,33 @@ function readStringField(record: Record<string, unknown>, key: string): string |
   return trimmed === '' ? null : trimmed;
 }
 
-export function parseYouTubeMeta(json: unknown, pageUrl: string, isPlaylist: boolean): ReleaseMeta | null {
+type OEmbedArtistPolicy = 'strip-topic' | 'as-is' | 'force-null';
+
+function parseOEmbedMeta(json: unknown, pageUrl: string, policy: OEmbedArtistPolicy): ReleaseMeta | null {
   if (typeof json !== 'object' || json === null) return null;
   const record = json as Record<string, unknown>;
   const rawTitle = readStringField(record, 'title');
   if (rawTitle === null) return null;
   const author = readStringField(record, 'author_name');
   const thumbnail = readStringField(record, 'thumbnail_url');
+  const artist =
+    policy === 'force-null' || author === null
+      ? null
+      : policy === 'strip-topic'
+        ? stripTopicSuffix(author)
+        : author;
   return {
     title: decodeEntities(rawTitle),
-    artist: isPlaylist || author === null ? null : stripTopicSuffix(author),
+    artist,
     coverUrl: thumbnail,
     url: pageUrl,
   };
+}
+
+export function parseYouTubeMeta(json: unknown, pageUrl: string, isPlaylist: boolean): ReleaseMeta | null {
+  return parseOEmbedMeta(json, pageUrl, isPlaylist ? 'force-null' : 'strip-topic');
+}
+
+export function parseSoundCloudMeta(json: unknown, pageUrl: string, isSet: boolean): ReleaseMeta | null {
+  return parseOEmbedMeta(json, pageUrl, isSet ? 'force-null' : 'as-is');
 }
