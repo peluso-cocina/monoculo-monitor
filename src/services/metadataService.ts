@@ -82,7 +82,11 @@ export async function extractRelease(
     const length = Number(res.header('content-length'));
     if (Number.isFinite(length) && length > MAX_DOWNLOAD_BYTES) return null;
     const html = (await res.text()).slice(0, MAX_HTML_CHARS);
-    return parseMetadata(html, res.url === '' ? url : res.url);
+    const finalUrl = res.url === '' ? url : res.url;
+    if (isTidalUrl(url) || isFeatureFmUrl(url)) {
+      return parseTidalMeta(html, finalUrl, isPlaylistUrl(url) || isTidalPlaylist(url));
+    }
+    return parseMetadata(html, finalUrl);
   } catch {
     return null;
   }
@@ -184,6 +188,130 @@ export function isSoundCloudSet(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+const TIDAL_APEX = 'tidal.com';
+const FEATURE_FM_APEX = 'feature.fm';
+const FFM_TO_APEXES = new Set(['ffm.to', 'www.ffm.to']);
+
+export function isTidalUrl(url: string): boolean {
+  const host = normalizeHost(url);
+  if (host === '') return false;
+  return host === TIDAL_APEX || host.endsWith(`.${TIDAL_APEX}`);
+}
+
+export function isFeatureFmUrl(url: string): boolean {
+  const host = normalizeHost(url);
+  if (host === '') return false;
+  if (FFM_TO_APEXES.has(host)) return true;
+  return host === FEATURE_FM_APEX || host.endsWith(`.${FEATURE_FM_APEX}`);
+}
+
+export function isTidalPlaylist(url: string): boolean {
+  try {
+    const path = new URL(url).pathname;
+    return path === '/playlist' || path.startsWith('/playlist/');
+  } catch {
+    return false;
+  }
+}
+
+const TIDAL_DASH_SEPARATOR = ' - ';
+const MUSIC_JSON_LD_TYPES = new Set(['MusicAlbum', 'MusicRecording']);
+
+export interface TidalJsonLd {
+  title: string;
+  artist: string | null;
+  coverUrl: string | null;
+}
+
+function readJsonLdBlocks($: ReturnType<typeof load>): unknown[] {
+  const blocks: unknown[] = [];
+  $('script[type="application/ld+json"]').each((_, el) => {
+    const text = $(el).text();
+    if (text.trim() === '') return;
+    try {
+      blocks.push(JSON.parse(text) as unknown);
+    } catch {
+      // broken block: skip
+    }
+  });
+  return blocks;
+}
+
+function flattenJsonLd(block: unknown): Record<string, unknown>[] {
+  if (Array.isArray(block)) return block.filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null);
+  if (typeof block !== 'object' || block === null) return [];
+  const record = block as Record<string, unknown>;
+  const graph = record['@graph'];
+  if (Array.isArray(graph)) {
+    return graph.filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null);
+  }
+  return [record];
+}
+
+function isMusicBlock(record: Record<string, unknown>): boolean {
+  const type = record['@type'];
+  if (typeof type === 'string') return MUSIC_JSON_LD_TYPES.has(type);
+  if (Array.isArray(type)) return type.some((t) => typeof t === 'string' && MUSIC_JSON_LD_TYPES.has(t));
+  return false;
+}
+
+function readArtistName(byArtist: unknown): string | null {
+  const first = Array.isArray(byArtist) ? byArtist[0] : byArtist;
+  if (typeof first !== 'object' || first === null) return null;
+  const name = (first as Record<string, unknown>)['name'];
+  if (typeof name !== 'string' || name.trim() === '') return null;
+  return name.trim();
+}
+
+function readImageUrl(image: unknown): string | null {
+  if (typeof image !== 'string' || image.trim() === '') return null;
+  return image.trim();
+}
+
+export function parseTidalJsonLd(html: string): TidalJsonLd | null {
+  const $ = load(html);
+  for (const block of readJsonLdBlocks($)) {
+    for (const record of flattenJsonLd(block)) {
+      if (!isMusicBlock(record)) continue;
+      const name = record['name'];
+      if (typeof name !== 'string' || name.trim() === '') continue;
+      return {
+        title: name.trim(),
+        artist: readArtistName(record['byArtist']),
+        coverUrl: readImageUrl(record['image']),
+      };
+    }
+  }
+  return null;
+}
+
+export function splitDashTitle(ogTitle: string): { title: string; artist: string | null } {
+  const cut = ogTitle.lastIndexOf(TIDAL_DASH_SEPARATOR);
+  if (cut < 0) return { title: ogTitle, artist: null };
+  return {
+    title: ogTitle.slice(cut + TIDAL_DASH_SEPARATOR.length).trim(),
+    artist: ogTitle.slice(0, cut).trim() || null,
+  };
+}
+
+export function parseTidalMeta(html: string, pageUrl: string, isPlaylist: boolean): ReleaseMeta | null {
+  const $ = load(html);
+  const ogUrl = readMeta($, 'og:url') ?? pageUrl;
+  const jsonLd = parseTidalJsonLd(html);
+  if (jsonLd !== null) {
+    return {
+      title: jsonLd.title,
+      artist: isPlaylist ? null : jsonLd.artist,
+      coverUrl: jsonLd.coverUrl,
+      url: ogUrl,
+    };
+  }
+  const ogTitle = readMeta($, 'og:title');
+  if (ogTitle === null) return null;
+  const { title, artist } = splitDashTitle(ogTitle);
+  return { title, artist: isPlaylist ? null : artist, coverUrl: readMeta($, 'og:image'), url: ogUrl };
 }
 
 const TOPIC_SUFFIX = ' - Topic';
