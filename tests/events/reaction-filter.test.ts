@@ -5,7 +5,7 @@ import {
   shouldProcessReaction,
 } from '../../src/events/messageReactionAdd.js';
 
-const GOOD = { userIsBot: false, authorIsBot: false, inGuild: true, emojiName: '📝' };
+const GOOD = { userIsBot: false, authorIsBot: false, inGuild: true, emojiName: '📝', emojiId: null };
 
 describe('RF-01 reaction filter', () => {
   it('procesa :memo: de humano en servidor', () => {
@@ -18,6 +18,8 @@ describe('RF-01 reaction filter', () => {
     [{ ...GOOD, inGuild: false }],
     [{ ...GOOD, emojiName: '✅' }],
     [{ ...GOOD, emojiName: null }],
+    [{ ...GOOD, emojiName: 'escine', emojiId: '123456789' }],
+    [{ ...GOOD, emojiId: '123456789' }],
   ])('ignora %j', (input) => {
     expect(shouldProcessReaction(input)).toBe(false);
   });

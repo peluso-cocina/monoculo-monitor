@@ -12,11 +12,16 @@ export interface ReactionFilterInput {
   authorIsBot: boolean;
   inGuild: boolean;
   emojiName: string | null;
+  emojiId: string | null;
 }
 
 export function shouldProcessReaction(input: ReactionFilterInput): boolean {
   return (
-    input.inGuild && !input.userIsBot && !input.authorIsBot && input.emojiName === MEMO_EMOJI
+    input.inGuild &&
+    !input.userIsBot &&
+    !input.authorIsBot &&
+    input.emojiId === null &&
+    input.emojiName === MEMO_EMOJI
   );
 }
 
@@ -53,6 +58,7 @@ async function handleMemoReaction(reaction: MessageReaction, user: User): Promis
       authorIsBot: reaction.message.author?.bot ?? false,
       inGuild: reaction.message.guildId !== null,
       emojiName: reaction.emoji.name,
+      emojiId: reaction.emoji.id,
     });
     if (!preFilter) return;
 
